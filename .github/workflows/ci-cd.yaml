@@ -1,0 +1,59 @@
+name: Build and Deploy Wisecow
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Build Docker image
+      run: docker build -t wisecow:latest .
+
+    - name: Test Docker image
+      run: |
+        docker run -d -p 4499:4499 --name wisecow-test wisecow:latest
+        sleep 5
+        curl -f http://localhost:4499 || exit 1
+        docker stop wisecow-test
+        docker rm wisecow-test
+
+    - name: Create Kind cluster
+      uses: helm/kind-action@v1.8.0
+      with:
+        config: kind-config.yaml
+        cluster_name: wisecow-cluster
+
+    - name: Load Docker image to Kind
+      run: kind load docker-image wisecow:latest --name wisecow-cluster
+
+    - name: Install NGINX Ingress Controller
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+        kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
+
+    - name: Install cert-manager
+      run: |
+        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+        kubectl wait --namespace cert-manager --for=condition=ready pod --selector=app=cert-manager --timeout=90s
+
+    - name: Deploy application
+      run: |
+        kubectl apply -f k8s/cert-issuer.yaml
+        kubectl apply -f k8s/deployment.yaml
+        kubectl apply -f k8s/service.yaml
+        kubectl wait --for=condition=available --timeout=300s deployment/wisecow-deployment
+        kubectl apply -f k8s/ingress.yaml
+
+    - name: Test deployment
+      run: |
+        kubectl get pods -l app=wisecow
+        kubectl get svc wisecow-service
+        kubectl get ingress wisecow-ingress
