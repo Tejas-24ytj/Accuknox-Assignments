@@ -21,7 +21,7 @@ HTTP/1.1 200
 
 
 <div style="text-align: center; margin: 20px;">
-<h2><b>Submission by Tejas Lamkhade</b></h2>
+<h2><b>Choosing AccuKnox was driven by opensource KubeArmor’s novel use of eBPF and LSM technologies, delivering runtime security</b></h2>
 </div>
 <pre>`cowsay $mod`</pre>
 EOF
