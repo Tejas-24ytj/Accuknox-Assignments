@@ -10,10 +10,10 @@ spec:
   ingressClassName: nginx
   tls:
   - hosts:
-    - tejaslamkhade.xyz
+    - a24a963e5a0f34ffc9b255609a14c5e0-b53a9b331bab26d1.elb.us-east-1.amazonaws.com
     secretName: wisecow-tls
   rules:
-  - host: tejaslamkhade.xyz
+  - host: a24a963e5a0f34ffc9b255609a14c5e0-b53a9b331bab26d1.elb.us-east-1.amazonaws.com
     http:
       paths:
       - path: /
