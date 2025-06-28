@@ -20,6 +20,9 @@ cat <<EOF > $RSPFILE
 HTTP/1.1 200
 
 
+<div style="text-align: center; margin: 20px;">
+<h2><b>Submission by Tejas Lamkhade</b></h2>
+</div>
 <pre>`cowsay $mod`</pre>
 EOF
 }
