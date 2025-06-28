@@ -112,5 +112,4 @@ jobs:
     - name: Get application URL
       run: |
         echo "Application deployed successfully!"
-        echo "URL: https://tejaslamkhade.xyz"
         kubectl get ingress wisecow-ingress -n wisecow
