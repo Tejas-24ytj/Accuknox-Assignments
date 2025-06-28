@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: wisecow-deployment
+  namespace: wisecow
   labels:
     app: wisecow
 spec:
@@ -16,8 +17,8 @@ spec:
     spec:
       containers:
       - name: wisecow
-        image: wisecow:latest
-        imagePullPolicy: Never
+        image: tejas24l/wisecow-tejas:latest
+        imagePullPolicy: Always
         ports:
         - containerPort: 4499
         resources:
@@ -27,3 +28,4 @@ spec:
           limits:
             memory: "128Mi"
             cpu: "100m"
+~
