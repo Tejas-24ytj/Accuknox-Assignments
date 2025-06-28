@@ -1,4 +1,4 @@
-name: Build and Deploy Wisecow
+name: Build and Deploy Wisecow to EKS
 
 on:
   push:
@@ -6,54 +6,111 @@ on:
   pull_request:
     branches: [ main ]
 
+env:
+  AWS_REGION: us-east-1
+  EKS_CLUSTER_NAME: wisecow-cluster
+  ECR_REPOSITORY: wisecow
+
 jobs:
-  build-and-test:
+  build-and-push:
     runs-on: ubuntu-latest
-    
+    outputs:
+      image-tag: ${{ github.sha }}
+      image-uri: ${{ steps.build-image.outputs.image }}
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Build Docker image
-      run: docker build -t wisecow:latest .
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-    - name: Test Docker image
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Build and push Docker images
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        IMAGE_TAG: ${{ github.sha }}
+        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       run: |
-        docker run -d -p 4499:4499 --name wisecow-test wisecow:latest
+        # Build image with multiple tags
+        docker build -t $DOCKER_USERNAME/wisecow-tejas:$IMAGE_TAG .
+        docker build -t $DOCKER_USERNAME/wisecow-tejas:latest .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+        docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest .
+        
+        # Test image locally
+        docker run -d -p 4499:4499 --name wisecow-test $DOCKER_USERNAME/wisecow-tejas:$IMAGE_TAG
         sleep 5
         curl -f http://localhost:4499 || exit 1
         docker stop wisecow-test
         docker rm wisecow-test
+        
+        # Push to Docker Hub
+        docker push $DOCKER_USERNAME/wisecow-tejas:$IMAGE_TAG
+        docker push $DOCKER_USERNAME/wisecow-tejas:latest
+        
+        # Push to ECR
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+        docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+        
+        echo "image=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" >> $GITHUB_OUTPUT
 
-    - name: Create Kind cluster
-      uses: helm/kind-action@v1.8.0
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
       with:
-        config: kind-config.yaml
-        cluster_name: wisecow-cluster
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
 
-    - name: Load Docker image to Kind
-      run: kind load docker-image wisecow:latest --name wisecow-cluster
+    - name: Update kubeconfig for EKS
+      run: aws eks update-kubeconfig --region ${{ env.AWS_REGION }} --name ${{ env.EKS_CLUSTER_NAME }}
 
-    - name: Install NGINX Ingress Controller
+    - name: Update deployment image
+      env:
+        IMAGE_URI: ${{ needs.build-and-push.outputs.image-uri }}
       run: |
-        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
-        kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=90s
+        # Update deployment.yaml with new image
+        sed -i "s|image: tejas24l/wisecow-tejas:latest|image: $IMAGE_URI|g" k8s/03-deployment.yaml
+        
+        # Apply all manifests
+        kubectl apply -f k8s/01-namespace.yaml
+        kubectl apply -f k8s/02-cert-issuer.yaml
+        kubectl apply -f k8s/03-deployment.yaml
+        kubectl apply -f k8s/04-service.yaml
+        kubectl apply -f k8s/05-ingress.yaml
 
-    - name: Install cert-manager
+    - name: Wait for deployment
       run: |
-        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
-        kubectl wait --namespace cert-manager --for=condition=ready pod --selector=app=cert-manager --timeout=90s
+        kubectl wait --for=condition=available --timeout=300s deployment/wisecow-deployment -n wisecow
+        kubectl get pods -n wisecow
+        kubectl get svc -n wisecow
+        kubectl get ingress -n wisecow
 
-    - name: Deploy application
+    - name: Get application URL
       run: |
-        kubectl apply -f k8s/cert-issuer.yaml
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/service.yaml
-        kubectl wait --for=condition=available --timeout=300s deployment/wisecow-deployment
-        kubectl apply -f k8s/ingress.yaml
-
-    - name: Test deployment
-      run: |
-        kubectl get pods -l app=wisecow
-        kubectl get svc wisecow-service
-        kubectl get ingress wisecow-ingress
+        echo "Application deployed successfully!"
+        echo "URL: https://tejaslamkhade.xyz"
+        kubectl get ingress wisecow-ingress -n wisecow
